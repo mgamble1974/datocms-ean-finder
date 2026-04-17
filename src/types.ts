@@ -59,4 +59,9 @@ export interface LogEntry {
   durationMs: number;
   httpStatus?: number;
   errorMessage?: string;
+  requestUrl?: string;
+  authMethod?: 'none' | 'basic';
+  icecatMessage?: string;
+  icecatProductId?: number;
+  responseBodySummary?: string;
 }

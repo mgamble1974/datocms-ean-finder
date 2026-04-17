@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { RenderConfigScreenCtx } from 'datocms-plugin-sdk';
 import { Canvas, Button, TextField, SelectField, SwitchField } from 'datocms-react-ui';
-import { Params } from '../types';
+import { Params, LogEntry } from '../types';
 import { getLogs, clearLogs, formatTimestamp } from '../utils/logger';
 import { CHANGELOG } from '../utils/changelog';
 
@@ -35,7 +35,19 @@ export default function ConfigScreen({ ctx }: Props) {
   const [saving, setSaving] = useState(false);
 
   // Log state
-  const [logs, setLogs] = useState(() => getLogs());
+  const [logs, setLogs] = useState<LogEntry[]>(() => getLogs());
+  const [expandedRow, setExpandedRow] = useState<number | null>(null);
+
+  // Detecteer wijzigingen t.o.v. opgeslagen waarden
+  const isDirty =
+    enabled !== (saved.enabled ?? true) ||
+    icecatUsername !== (saved.icecatUsername ?? '') ||
+    icecatApiKey !== (saved.icecatApiKey ?? '') ||
+    language !== (saved.language ?? 'NL') ||
+    productNameField !== (saved.productNameField ?? '') ||
+    brandField !== (saved.brandField ?? '') ||
+    imageField !== (saved.imageField ?? '') ||
+    specsJsonField !== (saved.specsJsonField ?? '');
 
   const handleSave = async () => {
     setSaving(true);
@@ -56,14 +68,20 @@ export default function ConfigScreen({ ctx }: Props) {
   const handleClearLogs = () => {
     clearLogs();
     setLogs([]);
+    setExpandedRow(null);
   };
 
-  const refreshLogs = () => setLogs(getLogs());
+  const refreshLogs = () => {
+    setLogs(getLogs());
+    setExpandedRow(null);
+  };
+
+  const toggleRow = (i: number) => setExpandedRow(prev => prev === i ? null : i);
 
   const statusColor: Record<string, string> = {
-    success: '#27ae60',
-    not_found: '#e67e22',
-    error: '#c0392b',
+    success: '#16a34a',
+    not_found: '#d97706',
+    error: '#dc2626',
   };
 
   const statusLabel: Record<string, string> = {
@@ -74,7 +92,7 @@ export default function ConfigScreen({ ctx }: Props) {
 
   return (
     <Canvas ctx={ctx}>
-      <div style={{ maxWidth: 640 }}>
+      <div style={{ maxWidth: 700 }}>
         <h2 style={{ marginTop: 0, marginBottom: 16 }}>EAN Product Lookup</h2>
 
         {/* Tabbladbalk */}
@@ -83,12 +101,9 @@ export default function ConfigScreen({ ctx }: Props) {
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              style={{
-                ...s.tabBtn,
-                ...(activeTab === tab ? s.tabBtnActive : {}),
-              }}
+              style={{ ...s.tabBtn, ...(activeTab === tab ? s.tabBtnActive : {}) }}
             >
-              {tab === 'settings' && 'Instellingen'}
+              {tab === 'settings' && (isDirty ? '● Instellingen' : 'Instellingen')}
               {tab === 'log' && `Activiteitenlog (${logs.length})`}
               {tab === 'changelog' && 'Changelog'}
             </button>
@@ -190,9 +205,18 @@ export default function ConfigScreen({ ctx }: Props) {
               </div>
             </section>
 
-            <Button onClick={handleSave} buttonType="primary" disabled={saving}>
-              {saving ? 'Opslaan…' : 'Instellingen opslaan'}
-            </Button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Button
+                onClick={handleSave}
+                buttonType="primary"
+                disabled={saving || !isDirty}
+              >
+                {saving ? 'Opslaan…' : 'Instellingen opslaan'}
+              </Button>
+              {!isDirty && (
+                <span style={{ fontSize: 12, color: '#9ca3af' }}>Geen wijzigingen</span>
+              )}
+            </div>
           </div>
         )}
 
@@ -203,7 +227,7 @@ export default function ConfigScreen({ ctx }: Props) {
               <span style={{ fontSize: 13, color: '#555' }}>
                 {logs.length === 0
                   ? 'Nog geen zoekopdrachten vastgelegd.'
-                  : `${logs.length} registratie(s) — meest recent bovenaan.`}
+                  : `${logs.length} registratie(s) — klik op een rij voor details.`}
               </span>
               <div style={{ display: 'flex', gap: 8 }}>
                 <Button onClick={refreshLogs} buttonSize="xxs">Vernieuwen</Button>
@@ -220,28 +244,54 @@ export default function ConfigScreen({ ctx }: Props) {
                 <table style={s.logTable}>
                   <thead>
                     <tr>
+                      <th style={s.th}></th>
                       <th style={s.th}>Tijdstip</th>
                       <th style={s.th}>EAN-code</th>
                       <th style={s.th}>Status</th>
                       <th style={s.th}>HTTP</th>
                       <th style={s.th}>ms</th>
-                      <th style={s.th}>Product</th>
+                      <th style={s.th}>Auth</th>
+                      <th style={s.th}>Product / Fout</th>
                     </tr>
                   </thead>
                   <tbody>
                     {logs.map((entry, i) => (
-                      <tr key={i} style={i % 2 === 0 ? s.trEven : s.trOdd}>
-                        <td style={s.td}>{formatTimestamp(entry.timestamp)}</td>
-                        <td style={{ ...s.td, fontFamily: 'monospace' }}>{entry.ean}</td>
-                        <td style={{ ...s.td, color: statusColor[entry.status], fontWeight: 600 }}>
-                          {statusLabel[entry.status]}
-                        </td>
-                        <td style={s.td}>{entry.httpStatus ?? '—'}</td>
-                        <td style={s.td}>{entry.durationMs}</td>
-                        <td style={{ ...s.td, color: '#555' }}>
-                          {entry.productTitle ?? entry.errorMessage ?? '—'}
-                        </td>
-                      </tr>
+                      <React.Fragment key={i}>
+                        <tr
+                          style={{
+                            ...(i % 2 === 0 ? s.trEven : s.trOdd),
+                            cursor: 'pointer',
+                          }}
+                          onClick={() => toggleRow(i)}
+                        >
+                          <td style={{ ...s.td, color: '#9ca3af', userSelect: 'none' }}>
+                            {expandedRow === i ? '▾' : '▸'}
+                          </td>
+                          <td style={{ ...s.td, whiteSpace: 'nowrap' }}>
+                            {formatTimestamp(entry.timestamp)}
+                          </td>
+                          <td style={{ ...s.td, fontFamily: 'monospace' }}>{entry.ean}</td>
+                          <td style={{ ...s.td, color: statusColor[entry.status], fontWeight: 600 }}>
+                            {statusLabel[entry.status]}
+                          </td>
+                          <td style={s.td}>{entry.httpStatus ?? '—'}</td>
+                          <td style={s.td}>{entry.durationMs}</td>
+                          <td style={{ ...s.td, color: '#6b7280' }}>
+                            {entry.authMethod === 'basic' ? 'Basic' : 'Geen'}
+                          </td>
+                          <td style={{ ...s.td, color: entry.status === 'error' ? '#dc2626' : '#374151' }}>
+                            {entry.productTitle ?? entry.errorMessage ?? '—'}
+                          </td>
+                        </tr>
+
+                        {expandedRow === i && (
+                          <tr style={{ background: '#f0f9ff' }}>
+                            <td colSpan={8} style={{ padding: '10px 12px' }}>
+                              <LogDetail entry={entry} />
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -276,6 +326,42 @@ export default function ConfigScreen({ ctx }: Props) {
         )}
       </div>
     </Canvas>
+  );
+}
+
+function LogDetail({ entry }: { entry: LogEntry }) {
+  const rows: [string, string | number | undefined][] = [
+    ['Tijdstip', entry.timestamp],
+    ['EAN-code', entry.ean],
+    ['Status', entry.status],
+    ['HTTP-statuscode', entry.httpStatus],
+    ['Responstijd', entry.durationMs !== undefined ? `${entry.durationMs} ms` : undefined],
+    ['Authenticatie', entry.authMethod === 'basic' ? 'Basic Auth (gebruikersnaam + API-sleutel)' : 'Geen (Open Icecat)'],
+    ['Request URL', entry.requestUrl],
+    ['Icecat-bericht', entry.icecatMessage],
+    ['Icecat product-ID', entry.icecatProductId],
+    ['Productnaam', entry.productTitle],
+    ['Foutmelding', entry.errorMessage],
+    ['Response samenvatting', entry.responseBodySummary],
+  ];
+
+  return (
+    <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 11 }}>
+      <tbody>
+        {rows.map(([label, value]) =>
+          value !== undefined && value !== null && value !== '' ? (
+            <tr key={label}>
+              <td style={{ padding: '2px 8px 2px 0', color: '#6b7280', whiteSpace: 'nowrap', verticalAlign: 'top', width: 180 }}>
+                {label}
+              </td>
+              <td style={{ padding: '2px 0', wordBreak: 'break-all', fontFamily: label === 'Request URL' || label === 'Response samenvatting' ? 'monospace' : undefined }}>
+                {String(value)}
+              </td>
+            </tr>
+          ) : null
+        )}
+      </tbody>
+    </table>
   );
 }
 

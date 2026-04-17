@@ -43,20 +43,33 @@ export default function SidebarPanel({ ctx }: Props) {
 
     try {
       const lang = params.language ?? 'NL';
-      const url =
+      const requestUrl =
         `https://live.icecat.us/api` +
         `?UserName=${encodeURIComponent(params.icecatUsername)}` +
         `&Language=${lang}` +
         `&Content=` +
         `&ean=${encodeURIComponent(trimmed)}`;
 
+      const useBasicAuth = !!(params.icecatUsername && params.icecatApiKey);
+      const authMethod: 'none' | 'basic' = useBasicAuth ? 'basic' : 'none';
       const headers: HeadersInit = {};
-      if (params.icecatUsername && params.icecatApiKey) {
+      if (useBasicAuth) {
         headers['Authorization'] = `Basic ${btoa(`${params.icecatUsername}:${params.icecatApiKey}`)}`;
       }
 
-      const res = await fetch(url, { headers });
+      const res = await fetch(requestUrl, { headers });
       const durationMs = Date.now() - t0;
+
+      // Probeer response body te lezen, ook bij fouten
+      let json: IcecatResponse | null = null;
+      let rawBodySummary: string | undefined;
+      try {
+        const text = await res.text();
+        rawBodySummary = text.length > 300 ? text.slice(0, 300) + '…' : text;
+        json = JSON.parse(text) as IcecatResponse;
+      } catch {
+        // response was geen geldige JSON
+      }
 
       if (!res.ok) {
         addLogEntry({
@@ -65,43 +78,56 @@ export default function SidebarPanel({ ctx }: Props) {
           status: 'error',
           durationMs,
           httpStatus: res.status,
-          errorMessage: `HTTP ${res.status}`,
+          requestUrl,
+          authMethod,
+          errorMessage: `HTTP ${res.status}${json?.msg ? ` — ${json.msg}` : ''}`,
+          responseBodySummary: rawBodySummary,
         });
         throw new Error(`HTTP ${res.status}`);
       }
 
-      const json: IcecatResponse = await res.json();
-
-      if (!json.data) {
+      if (!json?.data) {
         addLogEntry({
           timestamp: new Date().toISOString(),
           ean: trimmed,
           status: 'not_found',
           durationMs,
           httpStatus: res.status,
+          requestUrl,
+          authMethod,
+          icecatMessage: json?.msg,
+          responseBodySummary: rawBodySummary,
         });
-        setError(`Geen product gevonden voor EAN: ${trimmed}`);
+        setError(`Geen product gevonden voor EAN: ${trimmed}${json?.msg ? ` (${json.msg})` : ''}`);
       } else {
+        const specCount = json.data.FeaturesGroups?.reduce((n, g) => n + g.Features.length, 0) ?? 0;
         addLogEntry({
           timestamp: new Date().toISOString(),
           ean: trimmed,
           status: 'success',
           durationMs,
           httpStatus: res.status,
+          requestUrl,
+          authMethod,
           productTitle: json.data.GeneralInfo.Title,
+          icecatProductId: json.data.GeneralInfo.IcecatId,
+          icecatMessage: json.msg,
+          responseBodySummary: `Gevonden: "${json.data.GeneralInfo.Title}" (${json.data.GeneralInfo.Brand}) — ${specCount} specificaties in ${json.data.FeaturesGroups?.length ?? 0} groepen`,
         });
         setProduct(json.data);
       }
     } catch (err) {
       const durationMs = Date.now() - t0;
       const message = err instanceof Error ? err.message : 'Onbekende fout';
-      if (!error) {
+      // Alleen loggen als er nog geen entry is aangemaakt in de try-blokken hierboven
+      if (message !== `HTTP ${err instanceof Error ? err.message.replace('HTTP ', '') : ''}`) {
         addLogEntry({
           timestamp: new Date().toISOString(),
           ean: trimmed,
           status: 'error',
           durationMs,
           errorMessage: message,
+          responseBodySummary: 'Netwerkfout of CORS-probleem — geen response ontvangen',
         });
       }
       setError('Fout bij ophalen productdata. Controleer de gebruikersnaam en internetverbinding.');
