@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { RenderItemFormSidebarPanelCtx } from 'datocms-plugin-sdk';
 import { Canvas, Button, TextField, Spinner } from 'datocms-react-ui';
 import { IcecatProduct, IcecatFeatureGroup, IcecatResponse, Params } from '../types';
+import { addLogEntry } from '../utils/logger';
 
 interface Props {
   ctx: RenderItemFormSidebarPanelCtx;
@@ -13,6 +14,17 @@ export default function SidebarPanel({ ctx }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [product, setProduct] = useState<IcecatProduct | null>(null);
+
+  // Plugin uitgeschakeld
+  if (params.enabled === false) {
+    return (
+      <Canvas ctx={ctx}>
+        <div style={{ padding: '12px 0', color: '#9ca3af', fontSize: 13 }}>
+          De EAN-zoekfunctie is uitgeschakeld. Schakel de plug-in in via de instellingen.
+        </div>
+      </Canvas>
+    );
+  }
 
   const handleLookup = async () => {
     const trimmed = ean.trim();
@@ -27,6 +39,8 @@ export default function SidebarPanel({ ctx }: Props) {
     setError(null);
     setProduct(null);
 
+    const t0 = Date.now();
+
     try {
       const lang = params.language ?? 'NL';
       const url =
@@ -36,18 +50,60 @@ export default function SidebarPanel({ ctx }: Props) {
         `&Content=` +
         `&ean=${encodeURIComponent(trimmed)}`;
 
-      const res = await fetch(url);
+      const headers: HeadersInit = {};
+      if (params.icecatUsername && params.icecatApiKey) {
+        headers['Authorization'] = `Basic ${btoa(`${params.icecatUsername}:${params.icecatApiKey}`)}`;
+      }
+
+      const res = await fetch(url, { headers });
+      const durationMs = Date.now() - t0;
+
       if (!res.ok) {
+        addLogEntry({
+          timestamp: new Date().toISOString(),
+          ean: trimmed,
+          status: 'error',
+          durationMs,
+          httpStatus: res.status,
+          errorMessage: `HTTP ${res.status}`,
+        });
         throw new Error(`HTTP ${res.status}`);
       }
+
       const json: IcecatResponse = await res.json();
 
       if (!json.data) {
+        addLogEntry({
+          timestamp: new Date().toISOString(),
+          ean: trimmed,
+          status: 'not_found',
+          durationMs,
+          httpStatus: res.status,
+        });
         setError(`Geen product gevonden voor EAN: ${trimmed}`);
       } else {
+        addLogEntry({
+          timestamp: new Date().toISOString(),
+          ean: trimmed,
+          status: 'success',
+          durationMs,
+          httpStatus: res.status,
+          productTitle: json.data.GeneralInfo.Title,
+        });
         setProduct(json.data);
       }
-    } catch {
+    } catch (err) {
+      const durationMs = Date.now() - t0;
+      const message = err instanceof Error ? err.message : 'Onbekende fout';
+      if (!error) {
+        addLogEntry({
+          timestamp: new Date().toISOString(),
+          ean: trimmed,
+          status: 'error',
+          durationMs,
+          errorMessage: message,
+        });
+      }
       setError('Fout bij ophalen productdata. Controleer de gebruikersnaam en internetverbinding.');
     } finally {
       setLoading(false);

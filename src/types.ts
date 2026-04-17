@@ -41,10 +41,22 @@ export interface IcecatResponse {
 
 export interface Params {
   [key: string]: unknown;
+  enabled?: boolean;
   icecatUsername?: string;
+  icecatApiKey?: string;
   language?: string;
   productNameField?: string;
   brandField?: string;
   imageField?: string;
   specsJsonField?: string;
+}
+
+export interface LogEntry {
+  timestamp: string;
+  ean: string;
+  status: 'success' | 'not_found' | 'error';
+  productTitle?: string;
+  durationMs: number;
+  httpStatus?: number;
+  errorMessage?: string;
 }
