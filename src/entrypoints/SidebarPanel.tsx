@@ -170,7 +170,15 @@ export default function SidebarPanel({ ctx }: Props) {
           value={ean}
           onChange={setEan}
           placeholder="bijv. 8712581631995"
-          hint="8 of 13 cijfers"
+          hint="8 of 13 cijfers — druk op Enter om te zoeken"
+          textInputProps={{
+            onKeyDown: (e) => {
+              if (e.key === 'Enter' && !loading && ean.trim()) {
+                e.preventDefault();
+                handleLookup();
+              }
+            },
+          }}
         />
         <div style={{ marginTop: 8 }}>
           <Button

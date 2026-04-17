@@ -6,6 +6,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.3.1',
+    date: '2026-04-17T00:00:00Z',
+    changes: [
+      'EAN-zoekopdracht start nu direct na het indrukken van Enter in het invoerveld',
+      'Exact tijdstip (inclusief milliseconden) in het activiteitenlog weergegeven',
+    ],
+  },
+  {
+    version: '0.3.0',
+    date: '2026-04-17T00:00:00Z',
+    changes: [
+      'Opslaan-knop in instellingenscherm alleen actief bij wijzigingen (isDirty)',
+      'Uitgebreide logging met uitklapbare details per log-entry',
+    ],
+  },
+  {
     version: '0.2.0',
     date: '2026-04-17T00:00:00Z',
     changes: [

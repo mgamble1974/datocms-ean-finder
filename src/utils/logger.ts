@@ -32,12 +32,17 @@ export function clearLogs(): void {
 
 export function formatTimestamp(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleString('nl-NL', {
+  const datePart = d.toLocaleDateString('nl-NL', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
+  });
+  const timePart = d.toLocaleTimeString('nl-NL', {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
+    hour12: false,
   });
+  const ms = String(d.getMilliseconds()).padStart(3, '0');
+  return `${datePart} ${timePart}.${ms}`;
 }
