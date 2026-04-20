@@ -6,6 +6,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.4.1',
+    date: '2026-04-20T00:00:00Z',
+    changes: [
+      'CORS-fout opgelost: Icecat wordt nu via een Vercel proxy-functie aangeroepen in plaats van rechtstreeks vanuit de browser',
+      'Debug-log toont nu zowel de Icecat URL (server-side) als de proxy-route',
+    ],
+  },
+  {
     version: '0.4.0',
     date: '2026-04-20T00:00:00Z',
     changes: [

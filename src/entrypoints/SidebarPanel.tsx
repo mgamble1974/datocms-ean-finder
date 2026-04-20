@@ -87,23 +87,30 @@ export default function SidebarPanel({ ctx }: Props) {
 
       // Stap 4: URL opbouwen
       const lang = params.language ?? 'NL';
-      const requestUrl =
+      const icecatUrl =
         `https://live.icecat.us/api` +
         `?UserName=${encodeURIComponent(params.icecatUsername)}` +
         `&Language=${lang}` +
         `&Content=` +
         `&ean=${encodeURIComponent(trimmed)}`;
-      step('Taal', lang, 'info');
-      step('Request URL', requestUrl, 'info');
 
-      // Stap 5: Request verzenden
-      const headers: HeadersInit = {};
-      if (useBasicAuth) {
-        headers['Authorization'] = `Basic ${btoa(`${params.icecatUsername}:${params.icecatApiKey}`)}`;
-      }
+      // Proxy URL (server-side — voorkomt CORS-blokkering)
+      const proxyUrl =
+        `/api/icecat` +
+        `?ean=${encodeURIComponent(trimmed)}` +
+        `&username=${encodeURIComponent(params.icecatUsername)}` +
+        `&language=${lang}` +
+        (useBasicAuth ? `&apikey=${encodeURIComponent(params.icecatApiKey!)}` : '');
+
+      step('Taal', lang, 'info');
+      step('Icecat URL (server-side)', icecatUrl, 'info');
+      step('Via proxy', '/api/icecat (Vercel serverless)', 'info');
+
+      // Stap 5: Request verzenden via proxy
       step('Verzoek verzonden', new Date().toLocaleTimeString('nl-NL'), 'info');
 
-      const res = await fetch(requestUrl, { headers });
+      const requestUrl = icecatUrl; // bewaar voor logging
+      const res = await fetch(proxyUrl);
       const durationMs = Date.now() - t0;
 
       step(
