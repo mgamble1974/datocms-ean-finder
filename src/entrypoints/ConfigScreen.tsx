@@ -4,6 +4,7 @@ import { Canvas, Button, TextField, SelectField, SwitchField } from 'datocms-rea
 import { Params, LogEntry } from '../types';
 import { getLogs, clearLogs, formatTimestamp } from '../utils/logger';
 import { CHANGELOG } from '../utils/changelog';
+import pkg from '../../package.json';
 
 interface Props {
   ctx: RenderConfigScreenCtx;
@@ -93,7 +94,10 @@ export default function ConfigScreen({ ctx }: Props) {
   return (
     <Canvas ctx={ctx}>
       <div style={{ maxWidth: 700 }}>
-        <h2 style={{ marginTop: 0, marginBottom: 16 }}>EAN Product Lookup</h2>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 0, marginBottom: 16 }}>
+          <h2 style={{ margin: 0 }}>EAN Product Lookup</h2>
+          <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 400 }}>v{pkg.version}</span>
+        </div>
 
         {/* Tabbladbalk */}
         <div style={s.tabBar}>

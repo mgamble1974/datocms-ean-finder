@@ -1,0 +1,2 @@
+- Op de front-end van de plug-in: Direct zoeken na indrukken van Enter in plaats van drukken op knop 'Productgegevens ophalen'
+- Ook exact tijdstip bij logging weergeven

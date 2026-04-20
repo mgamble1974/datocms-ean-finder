@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(find node_modules/datocms-react-ui/dist/types -name \"TextInput*.d.ts\" -exec cat {} \\\\;)",
+      "Bash(npx tsc *)",
+      "Bash(git -C \"O:/Reshift Digital BV/Websites/ID.nl/Plug-ins/datocms-ean-finder\" status)",
+      "Bash(node -e ' *)"
+    ]
+  }
+}

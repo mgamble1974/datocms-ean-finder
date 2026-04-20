@@ -6,6 +6,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.4.0',
+    date: '2026-04-20T00:00:00Z',
+    changes: [
+      'Debug-log toegevoegd in de zijbalk: stap-voor-stap overzicht van elke zoekopdracht',
+      'Log toont: EAN-validatie, gebruikersnaam, authenticatiemethode, request URL, HTTP-status, responstijd, Icecat-melding, productdetails en afbeeldingsbeschikbaarheid',
+      'Bij fouten klapt de debug-log automatisch uit zodat de oorzaak direct zichtbaar is',
+      'Bij succes blijft de log ingeklapt maar is hij altijd beschikbaar',
+    ],
+  },
+  {
     version: '0.3.1',
     date: '2026-04-17T00:00:00Z',
     changes: [

@@ -3,9 +3,24 @@ import { RenderItemFormSidebarPanelCtx } from 'datocms-plugin-sdk';
 import { Canvas, Button, TextField, Spinner } from 'datocms-react-ui';
 import { IcecatProduct, IcecatFeatureGroup, IcecatResponse, Params } from '../types';
 import { addLogEntry } from '../utils/logger';
+import pkg from '../../package.json';
 
 interface Props {
   ctx: RenderItemFormSidebarPanelCtx;
+}
+
+type StepStatus = 'ok' | 'info' | 'warn' | 'error';
+
+interface LogStep {
+  label: string;
+  value?: string;
+  status: StepStatus;
+}
+
+interface CallLog {
+  steps: LogStep[];
+  outcome: 'success' | 'not_found' | 'error';
+  durationMs: number;
 }
 
 export default function SidebarPanel({ ctx }: Props) {
@@ -14,6 +29,7 @@ export default function SidebarPanel({ ctx }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [product, setProduct] = useState<IcecatProduct | null>(null);
+  const [callLog, setCallLog] = useState<CallLog | null>(null);
 
   // Plugin uitgeschakeld
   if (params.enabled === false) {
@@ -30,18 +46,46 @@ export default function SidebarPanel({ ctx }: Props) {
     const trimmed = ean.trim();
     if (!trimmed) return;
 
-    if (!params.icecatUsername) {
-      setError('Configureer eerst een Icecat gebruikersnaam in de plug-in instellingen.');
-      return;
-    }
-
     setLoading(true);
     setError(null);
     setProduct(null);
+    setCallLog(null);
 
+    const steps: LogStep[] = [];
     const t0 = Date.now();
 
+    const step = (label: string, value: string | undefined, status: StepStatus) => {
+      steps.push({ label, value, status });
+    };
+
     try {
+      // Stap 1: EAN-validatie
+      const isValidEan = /^\d{8}$|^\d{13}$/.test(trimmed);
+      step('EAN-code', trimmed, isValidEan ? 'ok' : 'warn');
+      if (!isValidEan) {
+        step('Waarschuwing', 'EAN is niet 8 of 13 cijfers — toch doorgaan', 'warn');
+      }
+
+      // Stap 2: Gebruikersnaam check
+      if (!params.icecatUsername) {
+        step('Icecat gebruikersnaam', 'Niet ingesteld', 'error');
+        step('Gestopt', 'Stel een gebruikersnaam in via de plug-in instellingen', 'error');
+        setError('Configureer eerst een Icecat gebruikersnaam in de plug-in instellingen.');
+        setCallLog({ steps, outcome: 'error', durationMs: Date.now() - t0 });
+        return;
+      }
+      step('Icecat gebruikersnaam', params.icecatUsername, 'ok');
+
+      // Stap 3: Auth-methode
+      const useBasicAuth = !!(params.icecatUsername && params.icecatApiKey);
+      const authMethod: 'none' | 'basic' = useBasicAuth ? 'basic' : 'none';
+      step(
+        'Authenticatie',
+        useBasicAuth ? 'Basic Auth (gebruikersnaam + API-sleutel)' : 'Geen — Open Icecat modus',
+        'info'
+      );
+
+      // Stap 4: URL opbouwen
       const lang = params.language ?? 'NL';
       const requestUrl =
         `https://live.icecat.us/api` +
@@ -49,29 +93,46 @@ export default function SidebarPanel({ ctx }: Props) {
         `&Language=${lang}` +
         `&Content=` +
         `&ean=${encodeURIComponent(trimmed)}`;
+      step('Taal', lang, 'info');
+      step('Request URL', requestUrl, 'info');
 
-      const useBasicAuth = !!(params.icecatUsername && params.icecatApiKey);
-      const authMethod: 'none' | 'basic' = useBasicAuth ? 'basic' : 'none';
+      // Stap 5: Request verzenden
       const headers: HeadersInit = {};
       if (useBasicAuth) {
         headers['Authorization'] = `Basic ${btoa(`${params.icecatUsername}:${params.icecatApiKey}`)}`;
       }
+      step('Verzoek verzonden', new Date().toLocaleTimeString('nl-NL'), 'info');
 
       const res = await fetch(requestUrl, { headers });
       const durationMs = Date.now() - t0;
 
-      // Probeer response body te lezen, ook bij fouten
+      step(
+        'HTTP-response',
+        `${res.status} ${res.statusText} — ${durationMs}ms`,
+        res.ok ? 'ok' : 'error'
+      );
+
+      // Stap 6: Body lezen
       let json: IcecatResponse | null = null;
       let rawBodySummary: string | undefined;
       try {
         const text = await res.text();
-        rawBodySummary = text.length > 300 ? text.slice(0, 300) + '…' : text;
+        rawBodySummary = text.length > 400 ? text.slice(0, 400) + '…' : text;
         json = JSON.parse(text) as IcecatResponse;
+        step('Response body', 'Geldige JSON ontvangen', 'ok');
       } catch {
-        // response was geen geldige JSON
+        step('Response body', 'Geen geldige JSON — onverwacht formaat', 'error');
       }
 
+      if (json?.msg) {
+        step('Icecat-melding', json.msg, res.ok ? 'info' : 'error');
+      }
+
+      // Stap 7: HTTP-fout
       if (!res.ok) {
+        step('Resultaat', `Verzoek mislukt met HTTP ${res.status}`, 'error');
+        if (rawBodySummary) step('Response inhoud', rawBodySummary, 'error');
+
         addLogEntry({
           timestamp: new Date().toISOString(),
           ean: trimmed,
@@ -83,10 +144,17 @@ export default function SidebarPanel({ ctx }: Props) {
           errorMessage: `HTTP ${res.status}${json?.msg ? ` — ${json.msg}` : ''}`,
           responseBodySummary: rawBodySummary,
         });
-        throw new Error(`HTTP ${res.status}`);
+
+        setError(`Verzoek mislukt: HTTP ${res.status}${json?.msg ? ` — ${json.msg}` : ''}`);
+        setCallLog({ steps, outcome: 'error', durationMs });
+        return;
       }
 
+      // Stap 8: Product niet gevonden
       if (!json?.data) {
+        step('Productdata', 'Geen product gevonden voor deze EAN', 'warn');
+        if (rawBodySummary) step('Response inhoud', rawBodySummary, 'warn');
+
         addLogEntry({
           timestamp: new Date().toISOString(),
           ean: trimmed,
@@ -98,29 +166,50 @@ export default function SidebarPanel({ ctx }: Props) {
           icecatMessage: json?.msg,
           responseBodySummary: rawBodySummary,
         });
+
         setError(`Geen product gevonden voor EAN: ${trimmed}${json?.msg ? ` (${json.msg})` : ''}`);
-      } else {
-        const specCount = json.data.FeaturesGroups?.reduce((n, g) => n + g.Features.length, 0) ?? 0;
-        addLogEntry({
-          timestamp: new Date().toISOString(),
-          ean: trimmed,
-          status: 'success',
-          durationMs,
-          httpStatus: res.status,
-          requestUrl,
-          authMethod,
-          productTitle: json.data.GeneralInfo.Title,
-          icecatProductId: json.data.GeneralInfo.IcecatId,
-          icecatMessage: json.msg,
-          responseBodySummary: `Gevonden: "${json.data.GeneralInfo.Title}" (${json.data.GeneralInfo.Brand}) — ${specCount} specificaties in ${json.data.FeaturesGroups?.length ?? 0} groepen`,
-        });
-        setProduct(json.data);
+        setCallLog({ steps, outcome: 'not_found', durationMs });
+        return;
       }
+
+      // Stap 9: Succes
+      const specCount = json.data.FeaturesGroups?.reduce((n, g) => n + g.Features.length, 0) ?? 0;
+      const groupCount = json.data.FeaturesGroups?.length ?? 0;
+      step('Product gevonden', `${json.data.GeneralInfo.Title} (${json.data.GeneralInfo.Brand})`, 'ok');
+      step('Icecat product-ID', String(json.data.GeneralInfo.IcecatId ?? '—'), 'info');
+      step('Specificaties', `${specCount} kenmerken in ${groupCount} groepen`, 'info');
+      if (json.data.GeneralInfo.Image?.HighImg) {
+        step('Afbeelding', json.data.GeneralInfo.Image.HighImg, 'ok');
+      } else {
+        step('Afbeelding', 'Geen afbeelding beschikbaar', 'warn');
+      }
+
+      addLogEntry({
+        timestamp: new Date().toISOString(),
+        ean: trimmed,
+        status: 'success',
+        durationMs,
+        httpStatus: res.status,
+        requestUrl,
+        authMethod,
+        productTitle: json.data.GeneralInfo.Title,
+        icecatProductId: json.data.GeneralInfo.IcecatId,
+        icecatMessage: json.msg,
+        responseBodySummary: `Gevonden: "${json.data.GeneralInfo.Title}" (${json.data.GeneralInfo.Brand}) — ${specCount} specificaties in ${groupCount} groepen`,
+      });
+
+      setProduct(json.data);
+      setCallLog({ steps, outcome: 'success', durationMs });
+
     } catch (err) {
       const durationMs = Date.now() - t0;
       const message = err instanceof Error ? err.message : 'Onbekende fout';
-      // Alleen loggen als er nog geen entry is aangemaakt in de try-blokken hierboven
-      if (message !== `HTTP ${err instanceof Error ? err.message.replace('HTTP ', '') : ''}`) {
+
+      // Alleen loggen als er geen HTTP-fout al is gelogd
+      if (!message.startsWith('HTTP ')) {
+        step('Netwerkfout', message, 'error');
+        step('Mogelijke oorzaak', 'Netwerkprobleem, CORS-blokkering of ongeldige URL', 'error');
+
         addLogEntry({
           timestamp: new Date().toISOString(),
           ean: trimmed,
@@ -130,7 +219,9 @@ export default function SidebarPanel({ ctx }: Props) {
           responseBodySummary: 'Netwerkfout of CORS-probleem — geen response ontvangen',
         });
       }
-      setError('Fout bij ophalen productdata. Controleer de gebruikersnaam en internetverbinding.');
+
+      setError('Fout bij ophalen productdata. Bekijk de debug-log hieronder voor details.');
+      setCallLog({ steps, outcome: 'error', durationMs });
     } finally {
       setLoading(false);
     }
@@ -201,6 +292,41 @@ export default function SidebarPanel({ ctx }: Props) {
         {/* Foutmelding */}
         {error && (
           <div style={styles.error}>{error}</div>
+        )}
+
+        {/* Debug-log */}
+        {callLog && (
+          <details style={styles.debugPanel} open={callLog.outcome !== 'success'}>
+            <summary style={styles.debugSummary}>
+              <span style={{ color: callLog.outcome === 'success' ? '#16a34a' : callLog.outcome === 'not_found' ? '#d97706' : '#dc2626' }}>
+                {callLog.outcome === 'success' ? '✓' : callLog.outcome === 'not_found' ? '○' : '✕'}
+              </span>
+              {' '}Debug-log
+              <span style={{ fontWeight: 400, color: '#9ca3af', marginLeft: 6 }}>
+                ({callLog.durationMs}ms)
+              </span>
+            </summary>
+            <div style={styles.debugBody}>
+              {callLog.steps.map((s, i) => (
+                <div key={i} style={styles.debugStep}>
+                  <span style={{ ...styles.debugIcon, color: stepColor(s.status) }}>
+                    {stepIcon(s.status)}
+                  </span>
+                  <span style={styles.debugLabel}>{s.label}</span>
+                  {s.value && (
+                    <span style={{
+                      ...styles.debugValue,
+                      color: stepColor(s.status),
+                      wordBreak: s.value.startsWith('http') ? 'break-all' : 'normal',
+                      fontFamily: s.value.startsWith('http') ? 'monospace' : undefined,
+                    }}>
+                      {s.value}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </details>
         )}
 
         {/* Resultaten */}
@@ -307,6 +433,11 @@ export default function SidebarPanel({ ctx }: Props) {
             )}
           </div>
         )}
+
+        {/* Versie-indicator */}
+        <div style={{ marginTop: 16, paddingTop: 8, borderTop: '1px solid #f0f0f0', fontSize: 10, color: '#9ca3af', textAlign: 'right' }}>
+          EAN Product Lookup v{pkg.version}
+        </div>
       </div>
     </Canvas>
   );
@@ -346,6 +477,24 @@ function FieldRow({
       </Button>
     </div>
   );
+}
+
+function stepIcon(status: StepStatus): string {
+  switch (status) {
+    case 'ok':   return '✓';
+    case 'info': return '·';
+    case 'warn': return '⚠';
+    case 'error': return '✕';
+  }
+}
+
+function stepColor(status: StepStatus): string {
+  switch (status) {
+    case 'ok':   return '#16a34a';
+    case 'info': return '#6b7280';
+    case 'warn': return '#d97706';
+    case 'error': return '#dc2626';
+  }
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -420,5 +569,46 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 11,
     fontWeight: 500,
     verticalAlign: 'top',
+  },
+  debugPanel: {
+    marginTop: 12,
+    border: '1px solid #e5e7eb',
+    borderRadius: 4,
+    fontSize: 11,
+    background: '#fafafa',
+  },
+  debugSummary: {
+    padding: '6px 8px',
+    cursor: 'pointer',
+    fontWeight: 600,
+    fontSize: 11,
+    userSelect: 'none',
+    listStyle: 'none',
+  },
+  debugBody: {
+    borderTop: '1px solid #e5e7eb',
+    padding: '6px 8px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 3,
+  },
+  debugStep: {
+    display: 'grid',
+    gridTemplateColumns: '12px 120px 1fr',
+    gap: 4,
+    alignItems: 'baseline',
+    lineHeight: 1.5,
+  },
+  debugIcon: {
+    fontWeight: 700,
+    fontSize: 10,
+    textAlign: 'center',
+  },
+  debugLabel: {
+    color: '#374151',
+    fontWeight: 500,
+  },
+  debugValue: {
+    fontSize: 11,
   },
 };
